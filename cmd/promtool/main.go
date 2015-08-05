@@ -22,8 +22,6 @@ import (
 	"strings"
 	"text/template"
 
-	"gopkg.in/yaml.v2"
-
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/prometheus/prometheus/util/cli"
@@ -73,21 +71,13 @@ func checkConfig(t cli.Term, filename string) ([]string, error) {
 		return nil, fmt.Errorf("is a directory")
 	}
 
-	content, err := ioutil.ReadFile(filename)
+	cfg, err := config.LoadFile(filename)
 	if err != nil {
 		return nil, err
 	}
 
-	var cfg config.Config
-	if err := yaml.Unmarshal(content, &cfg); err != nil {
-		return nil, err
-	}
 	var ruleFiles []string
 	for _, rf := range cfg.RuleFiles {
-		if !filepath.IsAbs(rf) {
-			rf = filepath.Join(filepath.Dir(filename), rf)
-		}
-
 		rfs, err := filepath.Glob(rf)
 		if err != nil {
 			return nil, err
@@ -97,6 +87,30 @@ func checkConfig(t cli.Term, filename string) ([]string, error) {
 			return nil, fmt.Errorf("%q does not point to an existing file", rf)
 		}
 		ruleFiles = append(ruleFiles, rfs...)
+	}
+
+	found := func(fn string) bool {
+		// Nothing set, nothing to error on.
+		if fn == "" {
+			return true
+		}
+		_, err := os.Stat(fn)
+		return err == nil
+	}
+
+	for _, scfg := range cfg.ScrapeConfigs {
+		if !found(scfg.BearerTokenFile) {
+			return nil, fmt.Errorf("bearer token file %q does not exist", scfg.BearerTokenFile)
+		}
+
+		if scfg.ClientCert != nil {
+			if !found(scfg.ClientCert.Cert) {
+				return nil, fmt.Errorf("client cert file %q does not exist", scfg.ClientCert.Cert)
+			}
+			if !found(scfg.ClientCert.Key) {
+				return nil, fmt.Errorf("client key file %q does not exist", scfg.ClientCert.Key)
+			}
+		}
 	}
 
 	return ruleFiles, nil
